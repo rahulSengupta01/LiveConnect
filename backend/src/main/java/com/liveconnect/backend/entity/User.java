@@ -39,4 +39,10 @@ public class User {
     @UpdateTimestamp
     private LocalDateTime updatedAt;
 
+    @Column(name = "profile_picture")
+    private String profilePicture;
+
+    @Column(length = 500)
+    private String bio;
+
 }
