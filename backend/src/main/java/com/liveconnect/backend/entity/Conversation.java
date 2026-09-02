@@ -27,6 +27,9 @@ public class Conversation {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(length = 100)
+    private String name;
+
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }

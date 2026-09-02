@@ -1,7 +1,10 @@
 package com.liveconnect.backend.controller;
 
+import com.liveconnect.backend.dto.response.ConversationListResponse;
 import com.liveconnect.backend.dto.response.ConversationResponse;
 import com.liveconnect.backend.service.ConversationService;
+
+import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,4 +39,16 @@ public class ConversationController {
                 .status(HttpStatus.CREATED)
                 .body(response);
     }
+    @GetMapping
+        public ResponseEntity<List<ConversationListResponse>>
+                getMyConversations(
+                        Authentication authentication) {
+
+        List<ConversationListResponse> conversations =
+                conversationService.getMyConversations(
+                        authentication.getName()
+                );
+
+        return ResponseEntity.ok(conversations);
+        }
 }

@@ -12,7 +12,11 @@ import java.util.UUID;
 public interface ConversationMemberRepository
         extends JpaRepository<ConversationMember, UUID> {
 
-    List<ConversationMember> findByUser(User user);
+    List<ConversationMember> findByConversation(
+            Conversation conversation
+    );
 
-    List<ConversationMember> findByConversation(Conversation conversation);
+    List<ConversationMember> findByUser(
+            User user
+    );
 }
