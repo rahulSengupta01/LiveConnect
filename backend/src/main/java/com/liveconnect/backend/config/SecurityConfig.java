@@ -40,7 +40,8 @@ public class SecurityConfig {
 
                 // Authentication endpoints are public
                 .requestMatchers(
-                    "/api/auth/**"
+                    "/api/auth/**",
+                    "/ws/**"
                 ).permitAll()
 
                 // Everything else requires authentication
