@@ -1,13 +1,23 @@
+
 package com.liveconnect.backend.config;
 
 import com.liveconnect.backend.security.JwtAuthenticationFilter;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import org.springframework.http.HttpMethod;
+
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 public class SecurityConfig {
@@ -25,36 +35,80 @@ public class SecurityConfig {
             HttpSecurity http) throws Exception {
 
         http
-            // We are using JWT, so we don't need CSRF protection
+            // Enable CORS
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
+            // JWT authentication is stateless
             .csrf(csrf -> csrf.disable())
 
-            // Don't create server-side sessions
             .sessionManagement(session ->
                 session.sessionCreationPolicy(
                     SessionCreationPolicy.STATELESS
                 )
             )
 
-            // API authorization rules
             .authorizeHttpRequests(auth -> auth
 
-                // Authentication endpoints are public
+                // Allow browser preflight requests
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
+                // Public authentication and WebSocket endpoints
                 .requestMatchers(
                     "/api/auth/**",
                     "/ws/**"
                 ).permitAll()
 
-                // Everything else requires authentication
+                // Everything else requires JWT authentication
                 .anyRequest().authenticated()
             )
 
-            // Run our JWT filter before Spring's
-            // username/password authentication filter
             .addFilterBefore(
                 jwtAuthenticationFilter,
                 UsernamePasswordAuthenticationFilter.class
             );
 
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+
+        CorsConfiguration configuration =
+                new CorsConfiguration();
+
+        configuration.setAllowedOrigins(
+                List.of("http://localhost:3000")
+        );
+
+        configuration.setAllowedMethods(
+                List.of(
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS"
+                )
+        );
+
+        configuration.setAllowedHeaders(
+                List.of(
+                    "Authorization",
+                    "Content-Type",
+                    "Accept"
+                )
+        );
+
+        configuration.setAllowCredentials(false);
+
+        UrlBasedCorsConfigurationSource source =
+                new UrlBasedCorsConfigurationSource();
+
+        source.registerCorsConfiguration(
+                "/**",
+                configuration
+        );
+
+        return source;
     }
 }

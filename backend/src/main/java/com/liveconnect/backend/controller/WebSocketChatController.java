@@ -1,84 +1,148 @@
+
 package com.liveconnect.backend.controller;
 
+import com.liveconnect.backend.dto.request.MessageDeliveryRequest;
 import com.liveconnect.backend.dto.request.SendMessageRequest;
 import com.liveconnect.backend.dto.request.WebSocketMessageRequest;
 import com.liveconnect.backend.dto.response.MessageResponse;
+import com.liveconnect.backend.dto.response.MessageStatusResponse;
+import com.liveconnect.backend.repository.ConversationMemberRepository;
 import com.liveconnect.backend.service.MessageService;
-
-import java.security.Principal;
 
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
-import org.springframework.stereotype.Controller;
-import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Controller;
+
+import java.util.List;
+import java.util.UUID;
 
 @Controller
 public class WebSocketChatController {
 
     private final MessageService messageService;
-
     private final SimpMessagingTemplate messagingTemplate;
+    private final ConversationMemberRepository conversationMemberRepository;
 
     public WebSocketChatController(
             MessageService messageService,
-            SimpMessagingTemplate messagingTemplate) {
+            SimpMessagingTemplate messagingTemplate,
+            ConversationMemberRepository conversationMemberRepository) {
 
         this.messageService = messageService;
         this.messagingTemplate = messagingTemplate;
+        this.conversationMemberRepository = conversationMemberRepository;
     }
 
     @MessageMapping("/chat.send")
-public void sendMessage(
-        WebSocketMessageRequest request,
-        StompHeaderAccessor accessor) {
+    public void sendMessage(
+            WebSocketMessageRequest request,
+            StompHeaderAccessor accessor) {
 
-    Authentication authentication =
-            (Authentication) accessor.getUser();
+        // 1. Get authenticated user
+        Authentication authentication =
+                (Authentication) accessor.getUser();
 
-    if (authentication == null) {
-        throw new IllegalStateException(
-                "WebSocket user is not authenticated"
+        if (authentication == null) {
+            throw new IllegalStateException(
+                    "WebSocket user is not authenticated"
+            );
+        }
+
+        String username = authentication.getName();
+
+        UUID conversationId = request.getConversationId();
+
+        System.out.println(
+                "WebSocket message from user: " + username
         );
-    }
 
-    String username =
-            authentication.getName();
+        // 2. Prepare message request
+        SendMessageRequest messageRequest =
+                new SendMessageRequest();
 
-    System.out.println(
-            "WebSocket message from user: "
-                    + username
-    );
+        messageRequest.setConversationId(conversationId);
+        messageRequest.setContent(request.getContent());
+        messageRequest.setMessageType(request.getMessageType());
 
-    SendMessageRequest messageRequest =
-            new SendMessageRequest();
+        // 3. Save message through existing service
+        MessageResponse response =
+                messageService.sendMessage(
+                        username,
+                        messageRequest
+                );
 
-    messageRequest.setConversationId(
-            request.getConversationId()
-    );
+        // 4. Send to users currently viewing this conversation
+        String conversationDestination =
+                "/topic/conversation/" + conversationId;
 
-    messageRequest.setContent(
-            request.getContent()
-    );
+        messagingTemplate.convertAndSend(
+                conversationDestination,
+                response
+        );
 
-    messageRequest.setMessageType(
-            request.getMessageType()
-    );
+        // 5. Find every participant in this conversation
+        List<String> participants =
+                conversationMemberRepository
+                        .findUsernamesByConversationId(conversationId);
 
-    MessageResponse response =
-            messageService.sendMessage(
-                    username,
-                    messageRequest
+        // 6. Send a personal sidebar update to every participant
+        for (String participantUsername : participants) {
+
+            messagingTemplate.convertAndSendToUser(
+                    participantUsername,
+                    "/queue/conversation-updates",
+                    response
             );
 
-    String destination =
-            "/topic/conversation/"
-                    + request.getConversationId();
+            System.out.println(
+                    "Conversation update sent to: "
+                            + participantUsername
+            );
+        }
+    }
+        @MessageMapping("/chat.delivered")
+        public void markMessageDelivered(
+                MessageDeliveryRequest request,
+                StompHeaderAccessor accessor) {
 
-    messagingTemplate.convertAndSend(
-            destination,
-            response
-    );
-}
+        // 1. Get authenticated recipient
+        Authentication authentication =
+                (Authentication) accessor.getUser();
+
+        if (authentication == null) {
+                throw new IllegalStateException(
+                        "WebSocket user is not authenticated"
+                );
+        }
+
+        String username = authentication.getName();
+
+        // 2. Validate request
+        if (request.getMessageId() == null) {
+                throw new IllegalArgumentException(
+                        "Message ID is required"
+                );
+        }
+
+        // 3. Update receipt through service
+        MessageStatusResponse response =
+                messageService.markMessageDelivered(
+                        username,
+                        request.getMessageId()
+                );
+
+        // 4. Notify original sender privately
+        messagingTemplate.convertAndSendToUser(
+                response.getSenderUsername(),
+                "/queue/message-status",
+                response
+        );
+
+        System.out.println(
+                "Message " + response.getMessageId()
+                        + " delivered to " + username
+        );
+        }
 }

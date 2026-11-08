@@ -33,16 +33,13 @@ public class WebSocketConfig
         );
     }
 
-    @Override
-    public void configureMessageBroker(
-            MessageBrokerRegistry config) {
 
-        config.enableSimpleBroker("/topic");
+        @Override
+        public void configureMessageBroker(MessageBrokerRegistry config) {
+                config.enableSimpleBroker("/topic", "/queue");
+                config.setApplicationDestinationPrefixes("/app");
+        }
 
-        config.setApplicationDestinationPrefixes(
-                "/app"
-        );
-    }
 
     @Override
     public void registerStompEndpoints(
