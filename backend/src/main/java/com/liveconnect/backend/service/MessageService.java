@@ -4,6 +4,7 @@ import com.liveconnect.backend.dto.request.SendMessageRequest;
 import com.liveconnect.backend.dto.response.MessageResponse;
 import com.liveconnect.backend.dto.response.MessageStatusResponse;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -21,8 +22,14 @@ public interface MessageService {
             String conversationId,
             Pageable pageable
     );
+
     MessageStatusResponse markMessageDelivered(
-        String username,
-        UUID messageId
-        );
+            String username,
+            UUID messageId
+    );
+
+    List<MessageStatusResponse> markConversationAsRead(
+            String username,
+            UUID conversationId
+    );
 }

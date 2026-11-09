@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Client } from "@stomp/stompjs";
 
@@ -15,6 +15,28 @@ import { Conversation } from "@/types/conversation";
 import { Message } from "@/types/message";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
+
+// Extract the authenticated username from the JWT subject.
+function getUsernameFromToken(token: string): string | null {
+    try {
+        const payload = token.split(".")[1];
+
+        if (!payload) return null;
+
+        const base64 = payload
+            .replace(/-/g, "+")
+            .replace(/_/g, "/");
+
+        const decoded = JSON.parse(atob(base64));
+
+        return typeof decoded.sub === "string"
+            ? decoded.sub
+            : null;
+    } catch (error) {
+        console.error("Unable to decode JWT:", error);
+        return null;
+    }
+}
 
 export default function ChatPage() {
     const router = useRouter();
@@ -33,6 +55,13 @@ export default function ChatPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    // Prevent duplicate delivery acknowledgements.
+    const acknowledgedMessagesRef = useRef<Set<string>>(new Set());
+
+    const currentUsername = token
+        ? getUsernameFromToken(token)
+        : null;
+
     // Redirect unauthenticated users.
     useEffect(() => {
         if (!authLoading && !isAuthenticated) {
@@ -40,7 +69,7 @@ export default function ChatPage() {
         }
     }, [authLoading, isAuthenticated, router]);
 
-    // Load conversation list.
+    // Load conversations.
     useEffect(() => {
         if (authLoading || !isAuthenticated || !token) return;
 
@@ -83,7 +112,7 @@ export default function ChatPage() {
         };
     }, [authLoading, isAuthenticated, token]);
 
-    // Update sidebar whenever a message arrives on the personal channel.
+    // Update the sidebar when a message arrives.
     const handleConversationUpdate = useCallback(
         (message: Message) => {
             setConversations((previous) => {
@@ -137,7 +166,8 @@ export default function ChatPage() {
         []
     );
 
-    // Establish one user-level WebSocket connection.
+    // One user-level WebSocket connection.
+    // This connection owns DELIVERY acknowledgements.
     useEffect(() => {
         if (!token || !isAuthenticated) return;
 
@@ -161,6 +191,11 @@ export default function ChatPage() {
                     "Connected to personal conversation updates"
                 );
 
+                console.log(
+                    "Authenticated username:",
+                    currentUsername
+                );
+
                 client.subscribe(
                     "/user/queue/conversation-updates",
                     (frame) => {
@@ -174,6 +209,37 @@ export default function ChatPage() {
                                 message
                             );
 
+                            // Ignore messages sent by the current user.
+                            const isIncomingMessage =
+                                currentUsername !== null &&
+                                message.senderUsername.toLowerCase() !==
+                                    currentUsername.toLowerCase();
+
+                            // Acknowledge only incoming messages.
+                            if (
+                                isIncomingMessage &&
+                                !acknowledgedMessagesRef.current.has(
+                                    message.id
+                                )
+                            ) {
+                                client.publish({
+                                    destination: "/app/chat.delivered",
+                                    body: JSON.stringify({
+                                        messageId: message.id,
+                                    }),
+                                });
+
+                                acknowledgedMessagesRef.current.add(
+                                    message.id
+                                );
+
+                                console.log(
+                                    "DELIVERED acknowledgement sent:",
+                                    message.id
+                                );
+                            }
+
+                            // Update sidebar.
                             handleConversationUpdate(message);
                         } catch (err) {
                             console.error(
@@ -207,7 +273,12 @@ export default function ChatPage() {
             cancelled = true;
             void client.deactivate();
         };
-    }, [token, isAuthenticated, handleConversationUpdate]);
+    }, [
+        token,
+        isAuthenticated,
+        currentUsername,
+        handleConversationUpdate,
+    ]);
 
     if (authLoading || !isAuthenticated || !token) {
         return (
@@ -219,6 +290,7 @@ export default function ChatPage() {
 
     return (
         <main className="relative flex h-screen overflow-hidden bg-white">
+
             {/* Sidebar */}
             <div className="w-full shrink-0 md:w-[360px]">
                 <ChatSidebar
@@ -250,6 +322,7 @@ export default function ChatPage() {
             >
                 Logout
             </button>
+
         </main>
     );
 }

@@ -2,6 +2,7 @@
 package com.liveconnect.backend.controller;
 
 import com.liveconnect.backend.dto.request.MessageDeliveryRequest;
+import com.liveconnect.backend.dto.request.MessageReadRequest;
 import com.liveconnect.backend.dto.request.SendMessageRequest;
 import com.liveconnect.backend.dto.request.WebSocketMessageRequest;
 import com.liveconnect.backend.dto.response.MessageResponse;
@@ -145,4 +146,48 @@ public class WebSocketChatController {
                         + " delivered to " + username
         );
         }
+        @MessageMapping("/chat.read")
+public void markConversationAsRead(
+        MessageReadRequest request,
+        StompHeaderAccessor accessor) {
+
+    // 1. Get authenticated user
+    Authentication authentication =
+            (Authentication) accessor.getUser();
+
+    if (authentication == null) {
+        throw new IllegalStateException(
+                "WebSocket user is not authenticated");
+    }
+
+    String username = authentication.getName();
+
+    // 2. Validate conversation ID
+    if (request == null || request.getConversationId() == null) {
+        throw new IllegalArgumentException(
+                "Conversation ID is required");
+    }
+
+    // 3. Mark messages as READ
+    List<MessageStatusResponse> responses =
+            messageService.markConversationAsRead(
+                    username,
+                    request.getConversationId()
+            );
+
+    // 4. Notify each original sender
+    for (MessageStatusResponse response : responses) {
+
+        messagingTemplate.convertAndSendToUser(
+                response.getSenderUsername(),
+                "/queue/message-status",
+                response
+        );
+
+        System.out.println(
+                "Message " + response.getMessageId()
+                        + " read by " + username
+        );
+    }
+}
 }

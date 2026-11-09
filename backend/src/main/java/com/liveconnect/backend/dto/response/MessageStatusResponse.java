@@ -12,14 +12,13 @@ import java.util.UUID;
 public class MessageStatusResponse {
 
     private UUID messageId;
-
     private UUID conversationId;
 
     private String recipientUsername;
-
     private String senderUsername;
 
     private MessageReceiptStatus status;
 
     private LocalDateTime deliveredAt;
+    private LocalDateTime readAt;
 }

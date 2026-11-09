@@ -1,23 +1,34 @@
 
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+    FormEvent,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
+
 import { Client } from "@stomp/stompjs";
 
 import { Conversation } from "@/types/conversation";
 import { Message } from "@/types/message";
+
 import { getConversationMessages } from "@/services/messageService";
 
 interface ChatWindowProps {
     conversation: Conversation | null;
     token: string;
-    // onNewMessage: (message: Message) => void;
 }
 
-type ConnectionState = "connecting" | "connected" | "disconnected";
+type ConnectionState =
+    | "connecting"
+    | "connected"
+    | "disconnected";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL;
 
+// Extract username from JWT.
 function getUsernameFromToken(token: string): string | null {
     try {
         const payload = token.split(".")[1];
@@ -33,11 +44,13 @@ function getUsernameFromToken(token: string): string | null {
         return typeof decoded.sub === "string"
             ? decoded.sub
             : null;
-    } catch {
+    } catch (error) {
+        console.error("Unable to decode JWT:", error);
         return null;
     }
 }
 
+// Merge messages and remove duplicates.
 function mergeMessages(
     current: Message[],
     incoming: Message[]
@@ -58,12 +71,13 @@ function mergeMessages(
 export default function ChatWindow({
     conversation,
     token,
-    // onNewMessage,
 }: ChatWindowProps) {
-    const conversationId = conversation?.conversationId ?? null;
+    const conversationId =
+        conversation?.conversationId ?? null;
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [messageText, setMessageText] = useState("");
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [sendError, setSendError] = useState<string | null>(null);
@@ -75,6 +89,38 @@ export default function ChatWindow({
     const bottomRef = useRef<HTMLDivElement | null>(null);
 
     const currentUsername = getUsernameFromToken(token);
+
+    // Mark all incoming messages in the current conversation as READ.
+    const markConversationAsRead = useCallback(() => {
+        const client = clientRef.current;
+
+        if (
+            !client ||
+            !client.connected ||
+            !conversationId
+        ) {
+            return;
+        }
+
+        try {
+            client.publish({
+                destination: "/app/chat.read",
+                body: JSON.stringify({
+                    conversationId,
+                }),
+            });
+
+            console.log(
+                "READ acknowledgement sent for conversation:",
+                conversationId
+            );
+        } catch (err) {
+            console.error(
+                "Failed to send READ acknowledgement:",
+                err
+            );
+        }
+    }, [conversationId]);
 
     useEffect(() => {
         if (conversationId === null || !token) {
@@ -90,6 +136,7 @@ export default function ChatWindow({
         setMessages([]);
         setError(null);
         setSendError(null);
+
         setLoading(true);
         setConnectionState("connecting");
 
@@ -114,6 +161,7 @@ export default function ChatWindow({
                     activeConversationId
                 );
 
+                // Subscribe to active conversation messages.
                 client.subscribe(
                     `/topic/conversation/${activeConversationId}`,
                     (frame) => {
@@ -128,16 +176,24 @@ export default function ChatWindow({
                                 return;
                             }
 
-                            // Update the message window.
+                            // Add message to UI.
                             setMessages((previous) =>
                                 mergeMessages(previous, [
                                     incomingMessage,
                                 ])
                             );
 
-                            // Notify ChatPage to update the sidebar.
-                            // onNewMessage(incomingMessage);
+                            // Check whether message came from another user.
+                            const isIncomingMessage =
+                                currentUsername !== null &&
+                                incomingMessage.senderUsername.toLowerCase() !==
+                                    currentUsername.toLowerCase();
 
+                            // If the current user is viewing this
+                            // conversation, mark incoming messages READ.
+                            if (isIncomingMessage) {
+                                markConversationAsRead();
+                            }
                         } catch (err) {
                             console.error(
                                 "Failed to parse WebSocket message:",
@@ -146,6 +202,10 @@ export default function ChatWindow({
                         }
                     }
                 );
+
+                // Mark previously unread messages READ when
+                // opening or reconnecting to this conversation.
+                markConversationAsRead();
             },
 
             onStompError: (frame) => {
@@ -163,13 +223,17 @@ export default function ChatWindow({
             },
 
             onWebSocketError: (event) => {
-                console.error("WebSocket error:", event);
+                console.error(
+                    "WebSocket error:",
+                    event
+                );
             },
         });
 
         clientRef.current = client;
         client.activate();
 
+        // Load messages already stored in PostgreSQL.
         async function loadHistory() {
             try {
                 const response = await getConversationMessages(
@@ -210,14 +274,21 @@ export default function ChatWindow({
 
             void client.deactivate();
         };
-    }, [conversationId, token]);
+    }, [
+        conversationId,
+        token,
+        currentUsername,
+        markConversationAsRead,
+    ]);
 
+    // Scroll to the latest message.
     useEffect(() => {
         bottomRef.current?.scrollIntoView({
             behavior: "smooth",
         });
     }, [messages]);
 
+    // Send a message.
     function handleSendMessage(
         event: FormEvent<HTMLFormElement>
     ) {
@@ -282,6 +353,7 @@ export default function ChatWindow({
 
     return (
         <section className="flex h-full min-w-0 flex-1 flex-col bg-gray-50">
+
             {/* Header */}
             <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
                 <div className="flex items-center gap-3">
@@ -331,6 +403,7 @@ export default function ChatWindow({
 
             {/* Messages */}
             <div className="flex-1 space-y-4 overflow-y-auto p-6">
+
                 {loading && (
                     <p className="text-center text-sm text-gray-500">
                         Loading previous messages...
@@ -361,7 +434,9 @@ export default function ChatWindow({
                         <div
                             key={message.id}
                             className={`flex ${
-                                isMine ? "justify-end" : "justify-start"
+                                isMine
+                                    ? "justify-end"
+                                    : "justify-start"
                             }`}
                         >
                             <div
